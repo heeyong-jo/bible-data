@@ -2,8 +2,9 @@
 if (typeof currentBibleSection === 'undefined') var currentBibleSection = null;
 if (typeof currentTab === 'undefined') var currentTab = 0;
 if (typeof TOTAL_TABS === 'undefined') var TOTAL_TABS = 7;
-
-
+if (typeof tabContainer === 'undefined') var tabContainer = null;
+if (typeof tabScrollStartX === 'undefined') var tabScrollStartX = 0;
+if (typeof tabOriginalScroll === 'undefined') var tabOriginalScroll = 0;
 
 
 // 시계 업데이트
@@ -156,14 +157,86 @@ function afterTab(n) {
   }
   
   function prepareNext(dir) {
-    const ni = getNext(dir);
-    if (ni < 0) return null;
-    const nxt = getPage(ni);
-    const top = curEl ? curEl.getBoundingClientRect().top : 60;
-    nxt.style.cssText = `display:block !important;position:fixed;top:${top}px;left:0;width:100%;z-index:10;transform:translateX(${dir > 0 ? W() : -W()}px);overflow-y:hidden;max-height:calc(100dvh - ${top}px);will-change:transform;`;
-    return nxt;
-  }
+  const ni = getNext(dir);
+  if (ni < 0) return null;
+  const nxt = getPage(ni);
+  const top = curEl ? curEl.getBoundingClientRect().top : 60;
+  // ⭐ 초기 위치 설정 및 보이게 처리
+  nxt.style.cssText = `display:block !important;position:fixed;top:${top}px;left:0;width:100%;z-index:10;transform:translateX(${dir > 0 ? W() : -W()}px);overflow-y:hidden;max-height:calc(100dvh - ${top}px);will-change:transform;opacity:1;`;
+  return nxt;
+}
   
+el.addEventListener('touchstart', e => {
+  if (currentTab === 5 && currentBibleSection) { locked = true; return; }
+  startX = e.touches[0].clientX;
+  startY = e.touches[0].clientY;
+  dragging = false;
+  locked = false;
+  dragDir = 0;
+  curEl = getPage(currentTab);
+  nxtEl = null;
+  
+  // ⭐ 상단 탭 컨테이너 위치 저장
+  tabContainer = document.querySelector('.tabs');
+  if (tabContainer) {
+    tabScrollStartX = tabContainer.scrollLeft;
+    tabOriginalScroll = tabContainer.scrollLeft;
+  }
+}, { passive: true });
+el.addEventListener('touchmove', e => {
+  const dx = e.touches[0].clientX - startX;
+  const dy = e.touches[0].clientY - startY;
+  if (!dragging && !locked) {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+    if (Math.abs(dy) > Math.abs(dx) * 1.8) { locked = true; curEl = null; return; }
+    if (currentTab === 0 && !currentUser && dx > 30) {
+      e.preventDefault();
+      document.getElementById('screen-login').style.display = 'flex';
+      dragging = false;
+      locked = true;
+      return;
+    }
+    dragging = true;
+    dragDir = dx > 0 ? -1 : 1;
+    if (curEl) {
+      const r = curEl.getBoundingClientRect();
+      curEl.style.cssText = `display:block !important;position:fixed;top:${r.top}px;left:0;width:100%;z-index:9;transform:translateX(0);overflow-y:hidden;max-height:calc(100dvh - ${r.top}px);will-change:transform;`;
+    }
+    nxtEl = prepareNext(dragDir);
+  }
+  if (locked || !dragging) return;
+  let tx = dx;
+  if ((dx > 0 && currentTab === 0) || (dx < 0 && getNext(1) < 0)) tx = dx * 0.18;
+  if (curEl) curEl.style.transform = `translateX(${tx}px)`;
+  if (nxtEl) nxtEl.style.transform = `translateX(${tx + (dragDir > 0 ? W() : -W())}px)`;
+  
+  // ⭐⭐ 추가: 상단 탭도 함께 이동 (드래그 비율에 따라)
+  if (tabContainer && dragging) {
+    const ratio = Math.abs(tx) / W();
+    const tabWidth = tabContainer.scrollWidth - tabContainer.clientWidth;
+    if (tabWidth > 0) {
+      const tabMove = (dragDir > 0 ? -1 : 1) * ratio * 80;
+      let newScroll = tabOriginalScroll + tabMove;
+      newScroll = Math.max(0, Math.min(tabWidth, newScroll));
+      tabContainer.scrollLeft = newScroll;
+      
+      // 드래그 중 탭 스타일 점진적 변경
+      const tabs = document.querySelectorAll('.tab');
+      const targetTabIndex = currentTab + (dragDir > 0 ? -1 : 1);
+      if (targetTabIndex >= 0 && targetTabIndex < TOTAL_TABS) {
+        const activeOpacity = 1 - ratio;
+        const nextOpacity = ratio;
+        tabs[currentTab].style.opacity = Math.max(0.3, activeOpacity);
+        if (tabs[targetTabIndex]) {
+          tabs[targetTabIndex].style.opacity = Math.min(1, nextOpacity + 0.3);
+          tabs[targetTabIndex].style.color = '#d4a840';
+        }
+      }
+    }
+  }
+}, { passive: false });
+
+
   function cleanup(finalIdx) {
     const f = getPage(finalIdx);
     f.style.cssText = '';
@@ -182,98 +255,107 @@ function afterTab(n) {
     });
   }
   
-  el.addEventListener('touchstart', e => {
-    if (currentTab === 5 && currentBibleSection) { locked = true; return; }
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    dragging = false;
-    locked = false;
-    dragDir = 0;
-    curEl = getPage(currentTab);
-    nxtEl = null;
-  }, { passive: true });
-  
-  el.addEventListener('touchmove', e => {
-    const dx = e.touches[0].clientX - startX;
-    const dy = e.touches[0].clientY - startY;
-    if (!dragging && !locked) {
-      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-      if (Math.abs(dy) > Math.abs(dx) * 1.8) { locked = true; curEl = null; return; }
-      if (currentTab === 0 && !currentUser && dx > 30) {
-        e.preventDefault();
-        document.getElementById('screen-login').style.display = 'flex';
-        dragging = false;
-        locked = true;
-        return;
-      }
-      dragging = true;
-      dragDir = dx > 0 ? -1 : 1;
-      if (curEl) {
-        const r = curEl.getBoundingClientRect();
-        curEl.style.cssText = `display:block !important;position:fixed;top:${r.top}px;left:0;width:100%;z-index:9;transform:translateX(0);overflow-y:hidden;max-height:calc(100dvh - ${r.top}px);will-change:transform;`;
-      }
-      nxtEl = prepareNext(dragDir);
-    }
-    if (locked || !dragging) return;
-    let tx = dx;
-    if ((dx > 0 && currentTab === 0) || (dx < 0 && getNext(1) < 0)) tx = dx * 0.18;
-    if (curEl) curEl.style.transform = `translateX(${tx}px)`;
-    if (nxtEl) nxtEl.style.transform = `translateX(${tx + (dragDir > 0 ? W() : -W())}px)`;
-  }, { passive: false });
-  
   el.addEventListener('touchend', e => {
-    if (locked) { locked = false; return; }
-    if (!dragging) { if (curEl) curEl.style.cssText = ''; return; }
-    const dx = e.changedTouches[0].clientX - startX;
-    const ratio = Math.abs(dx) / W();
-    const ni = getNext(dragDir);
-    const will = ratio >= 0.3 && nxtEl !== null && ni >= 0 && ni < TOTAL_TABS;
-    dragging = false;
-    if (will) {
-      const tX = dragDir > 0 ? -W() : W();
-      const sp = dx;
-      const dur = 220;
-      const start = performance.now();
-      const ease = t => 1 - Math.pow(1 - t, 3);
-      (function frame(now) {
-        const t = Math.min((now - start) / dur, 1);
-        const pos = sp + (tX - sp) * ease(t);
-        if (curEl) curEl.style.transform = `translateX(${pos}px)`;
-        if (nxtEl) nxtEl.style.transform = `translateX(${pos + (dragDir > 0 ? W() : -W())}px)`;
-        if (t < 1) {
-          requestAnimationFrame(frame);
-        } else {
-          if (ni !== 0 && !currentUser) {
-            cleanup(currentTab);
-            document.getElementById('screen-login').style.display = 'flex';
-          } else {
-            currentTab = ni;
-            document.querySelectorAll('.tab').forEach((tb, i) => tb.classList.toggle('active', i === currentTab));
-            cleanup(currentTab);
+  if (locked) { locked = false; return; }
+  if (!dragging) { 
+    if (curEl) curEl.style.cssText = ''; 
+    restoreTabStyles();  // ⭐ 추가
+    return; 
+  }
+  
+  const dx = e.changedTouches[0].clientX - startX;
+  const ratio = Math.abs(dx) / W();
+  const ni = getNext(dragDir);
+  const will = ratio >= 0.2 && nxtEl !== null && ni >= 0 && ni < TOTAL_TABS;
+  
+  dragging = false;
+  
+  if (will) {
+    const tX = dragDir > 0 ? -W() : W();
+    const sp = dx;
+    const dur = 220;
+    const start = performance.now();
+    const ease = t => 1 - Math.pow(1 - t, 3);
+    
+    (function frame(now) {
+      const t = Math.min((now - start) / dur, 1);
+      const pos = sp + (tX - sp) * ease(t);
+      if (curEl) curEl.style.transform = `translateX(${pos}px)`;
+      if (nxtEl) nxtEl.style.transform = `translateX(${pos + (dragDir > 0 ? W() : -W())}px)`;
+      
+      // ⭐ 탭 스크롤 애니메이션 추가
+      if (tabContainer && t < 1) {
+        const tabWidth = tabContainer.scrollWidth - tabContainer.clientWidth;
+        if (tabWidth > 0) {
+          const targetTabIndex = currentTab + (dragDir > 0 ? -1 : 1);
+          if (targetTabIndex >= 0 && targetTabIndex < TOTAL_TABS) {
+            const targetTab = document.querySelectorAll('.tab')[targetTabIndex];
+            if (targetTab) {
+              const targetLeft = targetTab.offsetLeft;
+              const currentLeft = tabContainer.scrollLeft;
+              const newLeft = currentLeft + (targetLeft - currentLeft) * ease(t);
+              tabContainer.scrollLeft = newLeft;
+            }
           }
         }
-      })(start);
-    } else {
-      const sp = dx;
-      const dur = 180;
-      const start = performance.now();
-      const ease = t => 1 - Math.pow(1 - t, 3);
-      (function frame(now) {
-        const t = Math.min((now - start) / dur, 1);
-        const pos = sp * (1 - ease(t));
-        if (curEl) curEl.style.transform = `translateX(${pos}px)`;
-        if (nxtEl) nxtEl.style.transform = `translateX(${pos + (dragDir > 0 ? W() : -W())}px)`;
-        if (t < 1) {
-          requestAnimationFrame(frame);
+      }
+      
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        if (ni !== 0 && !currentUser) {
+          cleanup(currentTab);
+          document.getElementById('screen-login').style.display = 'flex';
         } else {
+          currentTab = ni;
+          document.querySelectorAll('.tab').forEach((tb, i) => {
+            tb.classList.toggle('active', i === currentTab);
+            tb.style.opacity = '';
+            tb.style.color = '';
+          });
           cleanup(currentTab);
         }
-      })(start);
-    }
-  }, { passive: true });
-})();
-
-
+        restoreTabStyles();
+      }
+    })(start);
+  } else {
+    const sp = dx;
+    const dur = 250;
+    const start = performance.now();
+    const ease = t => 1 - Math.pow(1 - t, 3);
+    
+    (function frame(now) {
+      const t = Math.min((now - start) / dur, 1);
+      const pos = sp * (1 - ease(t));
+      if (curEl) curEl.style.transform = `translateX(${pos}px)`;
+      
+      // ⭐ 탭 스크롤 복귀 애니메이션 추가
+      if (tabContainer && t < 1) {
+        const newScroll = tabOriginalScroll + (tabOriginalScroll - tabContainer.scrollLeft) * (1 - ease(t));
+        tabContainer.scrollLeft = newScroll;
+      }
+      
+      if (nxtEl) {
+        if (t < 0.95) {
+          nxtEl.style.transform = `translateX(${pos + (dragDir > 0 ? W() : -W())}px)`;
+        } else {
+          nxtEl.style.display = 'none';
+          nxtEl.style.transform = '';
+        }
+      }
+      
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        if (curEl) curEl.style.cssText = '';
+        if (nxtEl) nxtEl.style.cssText = '';
+        curEl = null;
+        nxtEl = null;
+        restoreTabStyles();
+      }
+    })(start);
+  }
+}, { passive: true });
 
 
 // XSS 방지 함수 (간단한 이스케이프)
@@ -286,8 +368,6 @@ function escapeHtml(str) {
     return m;
   });
 }
-
-
 
 
 // 권한에 따라 관리자 전용 요소 표시/숨김
